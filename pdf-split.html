@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF таслагч</title>
+<style>
+  :root {
+    --bg: #f3f1ec; --ink: #1f2a2e; --muted: #6a7479; --line: #cfd3d1;
+    --accent: #1d6b5f; --accent-ink: #ffffff; --bad: #b3261e; --panel: #fbfaf7; --tint: #dcebe7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161b1d; --ink: #e6ebe9; --muted: #93a09c; --line: #2c3639;
+      --accent: #4fb3a0; --accent-ink: #0d1514; --bad: #ff8a80; --panel: #1c2326; --tint: #1f3631;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font: 600 28px/1.2 Georgia, "Times New Roman", serif; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; background: var(--panel); padding: 24px 16px; text-align: center; cursor: pointer; }
+  #drop.over { border-color: var(--accent); }
+  #drop:focus-visible, button:focus-visible, input:focus-visible, .thumb:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  #fileinfo { margin-top: 8px; font-weight: 600; }
+  #ranges { margin-top: 24px; display: none; }
+  .row { display: grid; grid-template-columns: 1fr 90px 90px 40px; gap: 8px; align-items: center; }
+  .head { color: var(--muted); font-size: 14px; margin-bottom: 8px; }
+  .item { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 12px; margin-bottom: 14px; }
+  .item.cur { border-color: var(--accent); }
+  input[type=text], input[type=number] { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+  input.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  button { font: inherit; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 9px 14px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .actions { display: flex; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
+  #msg { margin-top: 16px; min-height: 24px; }
+  #msg.err { color: var(--bad); }
+  #bar { height: 6px; background: var(--line); border-radius: 3px; margin-top: 12px; overflow: hidden; display: none; }
+  #bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .hint { color: var(--muted); font-size: 14px; margin-top: 12px; }
+
+  .strip { display: flex; gap: 10px; margin-top: 12px; overflow-x: auto; padding-bottom: 4px; }
+  .cell { flex: 0 0 120px; text-align: center; font-size: 13px; }
+  .cell .pic { aspect-ratio: 1 / 1.414; background: #fff; border: 2px solid var(--accent); border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center; color: #888; }
+  .cell.out .pic { border-color: var(--line); opacity: .45; }
+  .cell img { width: 100%; height: auto; display: block; }
+  .cell b { display: block; margin-top: 4px; }
+  .cell small { display: block; color: var(--muted); }
+  .cell:not(.out) small { color: var(--accent); }
+  .gap { flex: 0 0 auto; align-self: center; color: var(--muted); font-size: 22px; }
+
+  details { margin-top: 24px; }
+  summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 12px; }
+  .thumb { background: var(--panel); border: 2px solid var(--line); border-radius: 6px; padding: 5px; cursor: pointer; text-align: center; font-size: 13px; }
+  .thumb .pic { aspect-ratio: 1 / 1.414; background: #fff; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .thumb img { width: 100%; height: auto; display: block; }
+  .thumb.out { opacity: .4; }
+  .thumb.in { border-color: var(--accent); background: var(--tint); }
+  @media (max-width: 480px) { .row { grid-template-columns: 1fr 70px 70px 36px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>PDF таслагч</h1>
+  <p class="sub">Файл компьютер дээрээ үлдэнэ. Интернет рүү явахгүй. Хэмжээний хязгааргүй.</p>
+
+  <div id="drop" tabindex="0" role="button" aria-label="PDF файл сонгох">
+    PDF файлаа энд чирж оруул, эсвэл дарж сонго
+    <div id="fileinfo"></div>
+  </div>
+  <input id="file" type="file" accept="application/pdf,.pdf" hidden>
+
+  <section id="ranges">
+    <div class="row head"><span>Файлын нэр</span><span>Эхлэх</span><span>Дуусах</span><span></span></div>
+    <div id="rows"></div>
+    <div class="actions">
+      <button id="add" type="button">Хэсэг нэмэх</button>
+      <button id="go" type="button" class="primary">Тасдаж татах</button>
+      <label style="align-self:center;font-size:14px"><input type="checkbox" id="forceimg"> Зургаар хийх (хуудас хоосон гарвал)</label>
+    </div>
+    <div id="bar"><i></i></div>
+    <p class="hint">Дугаар бичихэд (эсвэл дээш/доош сумаар өөрчлөхөд) тухайн хэсгийн эхний болон сүүлийн хуудас доор нь шууд гарна. Бүдэг хуудас бол таслалтын гадна талын хуудас, тэр нь хаягдана.</p>
+  </section>
+
+  <div id="msg" role="status"></div>
+
+  <details id="all">
+    <summary>Бүх хуудсыг харах (сонголттой)</summary>
+    <p class="hint">Хуудас дээр дарахад идэвхтэй нүдэнд дугаар нь орно.</p>
+    <div id="grid"></div>
+  </details>
+</main>
+
+<script>
+function loadScript(src) {
+  return new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = ok; s.onerror = fail;
+    document.head.appendChild(s);
+  });
+}
+async function loadLib(local, cdn) {
+  try { await loadScript(local); } catch (e) { await loadScript(cdn); }
+}
+const libLib = loadLib('pdf-lib.min.js', 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js');
+const libView = (async () => {
+  await loadLib('pdf.min.js', 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js');
+  await loadLib('pdf.worker.min.js', 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js');
+})();
+
+const $ = id => document.getElementById(id);
+const drop = $('drop'), fileInput = $('file'), rowsEl = $('rows'), msg = $('msg'), grid = $('grid');
+let srcBytes = null, srcName = 'book', pageCount = 0, gen = 0, activeInput = null, pdfDoc = null;
+
+function say(t, err) { msg.textContent = t; msg.className = err ? 'err' : ''; }
+
+drop.onclick = () => fileInput.click();
+drop.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } };
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) openFile(e.dataTransfer.files[0]); };
+fileInput.onchange = () => { if (fileInput.files[0]) openFile(fileInput.files[0]); };
+
+// ---------- Хуудасны жижиг зураг (хэрэгтэй үед л зурна) ----------
+let libBroken = false;
+async function ensurePdf() {
+  await libView;
+  if (!pdfDoc) pdfDoc = await pdfjsLib.getDocument({ data: srcBytes.slice() }).promise;
+  return pdfDoc;
+}
+let cache = new Map();      // хуудас -> Promise<dataURL>
+let queue = [];             // хүлээж буй зурлага
+let busy = false;
+
+function getThumb(n, urgent) {
+  if (cache.has(n)) return cache.get(n);
+  const p = new Promise(resolve => {
+    const job = { n, resolve, g: gen };
+    if (urgent) queue.unshift(job); else queue.push(job);
+  });
+  cache.set(n, p);
+  pump();
+  return p;
+}
+async function pump() {
+  if (busy) return;
+  busy = true;
+  while (queue.length) {
+    const job = queue.shift();
+    if (job.g !== gen) { job.resolve(null); continue; }
+    try {
+      await ensurePdf();
+      const page = await pdfDoc.getPage(job.n);
+      const v1 = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: 240 / v1.width });
+      const c = document.createElement('canvas');
+      c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+      await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      job.resolve(c.toDataURL('image/jpeg', 0.8));
+      page.cleanup();
+    } catch (e) { job.resolve(null); }
+  }
+  busy = false;
+}
+function fillPic(pic, n, urgent) {
+  pic.textContent = '…';
+  getThumb(n, urgent).then(url => {
+    if (url) { const im = new Image(); im.src = url; im.alt = 'Хуудас ' + n; pic.replaceChildren(im); }
+    else pic.textContent = '?';
+  });
+}
+
+async function openFile(f) {
+  gen++;
+  cache = new Map(); queue = []; pdfDoc = null;
+  say('Уншиж байна...');
+  try {
+    await libLib;
+    srcBytes = new Uint8Array(await f.arrayBuffer());
+    libBroken = false;
+    try {
+      const doc = await PDFLib.PDFDocument.load(srcBytes, { ignoreEncryption: true });
+      pageCount = doc.getPageCount();
+    } catch (e) {
+      await ensurePdf();
+      pageCount = pdfDoc.numPages;
+      libBroken = true;
+    }
+    srcName = f.name.replace(/\.pdf$/i, '');
+    $('fileinfo').textContent = f.name + ' — ' + pageCount + ' хуудас';
+    rowsEl.innerHTML = ''; grid.innerHTML = ''; $('all').open = false; gridBuilt = false;
+    addRow('part1', 1, Math.min(pageCount, 130));
+    $('ranges').style.display = 'block';
+    say('');
+  } catch (e) {
+    say('Файл нээгдсэнгүй. pdf-lib.min.js ачаалагдаагүй эсвэл PDF эвдэрсэн байж магадгүй. (' + e.message + ')', true);
+  }
+}
+
+// ---------- Хэсэг бүрийн хил (эхлэх / дуусах хуудас) ----------
+function cellHTML(n, label, out) {
+  return '<div class="cell' + (out ? ' out' : '') + '" data-n="' + n + '"><div class="pic"></div><b>' + n + '</b><small>' + label + '</small></div>';
+}
+function renderStrip(item) {
+  const a = parseInt(item.querySelector('.a').value), b = parseInt(item.querySelector('.b').value);
+  const strip = item.querySelector('.strip');
+  const ok = n => n && n >= 1 && n <= pageCount;
+  let html = '';
+  if (ok(a) && a > 1) html += cellHTML(a - 1, 'хаягдана', true);
+  if (ok(a)) html += cellHTML(a, 'эхлэх', false);
+  if (ok(a) && ok(b) && b > a) {
+    if (b - a > 1) html += '<span class="gap" title="' + (b - a - 1) + ' хуудас дунд нь">⋯</span>';
+    html += cellHTML(b, 'дуусах', false);
+  }
+  if (ok(b) && b < pageCount && (!ok(a) || b >= a)) html += cellHTML(b + 1, 'хаягдана', true);
+  strip.innerHTML = html;
+  strip.querySelectorAll('.cell').forEach(c => fillPic(c.querySelector('.pic'), +c.dataset.n, true));
+}
+const timers = new WeakMap();
+function scheduleStrip(item) {
+  clearTimeout(timers.get(item));
+  timers.set(item, setTimeout(() => renderStrip(item), 350));
+}
+
+// ---------- Бүх хуудас (сонголттой) ----------
+let gridBuilt = false;
+$('all').addEventListener('toggle', () => {
+  if (!$('all').open || gridBuilt || !pageCount) return;
+  gridBuilt = true;
+  for (let i = 1; i <= pageCount; i++) {
+    const t = document.createElement('div');
+    t.className = 'thumb'; t.tabIndex = 0; t.dataset.p = i;
+    t.innerHTML = '<div class="pic"></div><b>' + i + '</b>';
+    t.onclick = () => pick(i);
+    t.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(i); } };
+    grid.appendChild(t);
+  }
+  const io = new IntersectionObserver(es => {
+    for (const en of es) if (en.isIntersecting) { io.unobserve(en.target); fillPic(en.target.querySelector('.pic'), +en.target.dataset.p, false); }
+  }, { rootMargin: '600px' });
+  grid.querySelectorAll('.thumb').forEach(el => io.observe(el));
+  refreshShade();
+});
+
+function pick(p) {
+  if (!activeInput) activeInput = rowsEl.querySelector('.a');
+  if (!activeInput) return;
+  activeInput.value = p;
+  activeInput.dispatchEvent(new Event('input', { bubbles: true }));
+  const all = [...rowsEl.querySelectorAll('input.a, input.b')];
+  setActive(all[all.indexOf(activeInput) + 1] || activeInput);
+}
+function setActive(inp) {
+  rowsEl.querySelectorAll('input.active').forEach(x => x.classList.remove('active'));
+  rowsEl.querySelectorAll('.item.cur').forEach(x => x.classList.remove('cur'));
+  activeInput = inp;
+  if (inp) { inp.classList.add('active'); inp.closest('.item').classList.add('cur'); }
+}
+function refreshShade() {
+  if (!gridBuilt) return;
+  const owner = new Array(pageCount + 1).fill(false);
+  for (const r of rowsEl.children) {
+    const a = parseInt(r.querySelector('.a').value), b = parseInt(r.querySelector('.b').value);
+    if (a && b && a <= b) for (let p = Math.max(a, 1); p <= Math.min(b, pageCount); p++) owner[p] = true;
+  }
+  grid.querySelectorAll('.thumb').forEach(t => {
+    const o = owner[+t.dataset.p];
+    t.classList.toggle('in', o); t.classList.toggle('out', !o);
+  });
+}
+
+// ---------- Хүрээний мөрүүд ----------
+function addRow(name, a, b) {
+  const item = document.createElement('div');
+  item.className = 'item';
+  item.innerHTML =
+    '<div class="row">' +
+    '<input type="text" class="n" aria-label="Файлын нэр">' +
+    '<input type="number" class="a" min="1" aria-label="Эхлэх хуудас">' +
+    '<input type="number" class="b" min="1" aria-label="Дуусах хуудас">' +
+    '<button type="button" aria-label="Устгах">×</button></div>' +
+    '<div class="strip"></div>';
+  item.querySelector('.n').value = name || ('part' + (rowsEl.children.length + 1));
+  item.querySelector('.a').value = a || '';
+  item.querySelector('.b').value = b || '';
+  item.querySelector('button').onclick = () => { if (activeInput && item.contains(activeInput)) activeInput = null; item.remove(); refreshShade(); };
+  item.addEventListener('input', () => { scheduleStrip(item); refreshShade(); });
+  item.querySelectorAll('input[type=number]').forEach(i => i.addEventListener('focus', () => setActive(i)));
+  rowsEl.appendChild(item);
+  renderStrip(item);
+  refreshShade();
+}
+
+$('add').onclick = () => {
+  const last = rowsEl.lastElementChild;
+  const next = last ? (parseInt(last.querySelector('.b').value) || 0) + 1 : 1;
+  addRow('', next <= pageCount ? next : '', '');
+  setActive(rowsEl.lastElementChild.querySelector('.a'));
+  rowsEl.lastElementChild.querySelector('.b').focus();
+};
+
+function readRanges() {
+  const out = [];
+  for (const r of rowsEl.children) {
+    const name = r.querySelector('.n').value.trim() || 'part';
+    const a = parseInt(r.querySelector('.a').value);
+    const b = parseInt(r.querySelector('.b').value);
+    if (!a || !b || a < 1 || b > pageCount || a > b) {
+      throw new Error('"' + name + '": хуудасны хүрээ буруу. 1 - ' + pageCount + ' дотор, эхлэх ≤ дуусах байх ёстой.');
+    }
+    out.push({ name, a, b });
+  }
+  if (!out.length) throw new Error('Хэсэг алга. "Хэсэг нэмэх" дар.');
+  return out;
+}
+
+function download(bytes, filename) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+async function inkOf(doc, n) {
+  const page = await doc.getPage(n);
+  const v1 = page.getViewport({ scale: 1 });
+  const vp = page.getViewport({ scale: 160 / v1.width });
+  const c = document.createElement('canvas');
+  c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  const d = ctx.getImageData(0, 0, c.width, c.height).data;
+  let k = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i] < 235 || d[i + 1] < 235 || d[i + 2] < 235) k++;
+  page.cleanup();
+  return k / (c.width * c.height);
+}
+// Тасалсан файл хоосон болсон эсэхийг эх хуудастай харьцуулж шалгана.
+async function looksBroken(bytes, a, b) {
+  try { await ensurePdf(); } catch (e) { return false; }   // шалгах хэрэгсэл байхгүй
+  try {
+    const test = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    const len = b - a + 1;
+    const picks = [...new Set([1, Math.ceil(len / 2), len])];
+    for (const k of picks) {
+      const s0 = await inkOf(pdfDoc, a + k - 1);
+      const o0 = await inkOf(test, k);
+      if (s0 > 0.003 && o0 < s0 * 0.3) return true;
+    }
+    return false;
+  } catch (e) { return true; }
+}
+// Найдвартай арга: хуудас бүрийг зураг болгож шинэ PDF-д хийнэ.
+async function buildFromImages(a, b, label) {
+  await ensurePdf();
+  const out = await PDFLib.PDFDocument.create();
+  for (let p = a; p <= b; p++) {
+    say('Зургаар хийж байна: ' + label + ' — хуудас ' + p + ' (' + (p - a + 1) + '/' + (b - a + 1) + ')');
+    const page = await pdfDoc.getPage(p);
+    const v1 = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: Math.min(3, 1600 / v1.width) });
+    const c = document.createElement('canvas');
+    c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+    const img = await out.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+    const pg = out.addPage([v1.width, v1.height]);
+    pg.drawImage(img, { x: 0, y: 0, width: v1.width, height: v1.height });
+    page.cleanup();
+  }
+  return await out.save();
+}
+
+$('go').onclick = async () => {
+  let ranges;
+  try { ranges = readRanges(); } catch (e) { say(e.message, true); return; }
+  const go = $('go'), bar = $('bar'), fill = bar.firstElementChild;
+  go.disabled = true; bar.style.display = 'block'; fill.style.width = '0';
+  let usedImg = 0;
+  try {
+    const force = $('forceimg').checked || libBroken;
+    let src = null;
+    if (!force) { try { src = await PDFLib.PDFDocument.load(srcBytes, { ignoreEncryption: true }); } catch (e) { src = null; } }
+    for (let i = 0; i < ranges.length; i++) {
+      const { name, a, b } = ranges[i];
+      say('Хийж байна: ' + name + ' (' + a + '-' + b + ')');
+      let bytes = null;
+      if (src) {
+        try {
+          const out = await PDFLib.PDFDocument.create();
+          const idx = Array.from({ length: b - a + 1 }, (_, k) => a - 1 + k);
+          const pages = await out.copyPages(src, idx);
+          pages.forEach(p => out.addPage(p));
+          bytes = await out.save();
+          if (await looksBroken(bytes, a, b)) bytes = null;
+        } catch (e) { bytes = null; }
+      }
+      if (!bytes) { bytes = await buildFromImages(a, b, name); usedImg++; }
+      download(bytes, srcName + '_' + name + '_' + a + '-' + b + '.pdf');
+      fill.style.width = Math.round((i + 1) / ranges.length * 100) + '%';
+      await new Promise(r => setTimeout(r, 400));
+    }
+    say('Дууслаа. ' + ranges.length + ' файл татагдлаа.' +
+        (usedImg ? ' ' + usedImg + ' файл зургаар хийгдсэн (эх хуудас шууд хуулагдахгүй байсан тул). Текст сонгох боломжгүй.' : ''));
+  } catch (e) {
+    say('Алдаа: ' + e.message, true);
+  } finally {
+    go.disabled = false;
+  }
+};
+</script>
+</body>
+</html>
